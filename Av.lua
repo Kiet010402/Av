@@ -430,10 +430,6 @@ repeat task.wait(0.25) until game:IsLoaded()
 getgenv().Image = "rbxassetid://13099788281" -- ID tài nguyên hình ảnh logo
 getgenv().ToggleUI = "LeftControl" -- Phím để bật/tắt giao diện
 
--- Biến để kiểm soát trạng thái hiển thị
-local uiVisible = true
-local inGame = false
-
 -- Tạo logo để mở lại UI khi đã minimize
 task.spawn(function()
     local success, errorMsg = pcall(function()
@@ -479,82 +475,6 @@ task.spawn(function()
         warn("Lỗi khi tạo nút Logo UI: " .. tostring(errorMsg))
     end
 end)
-
--- Thêm phát hiện khi vào màn chơi
-game.Players.LocalPlayer.PlayerGui.ChildAdded:Connect(function(child)
-    if child.Name == "GameGui" then
-        inGame = true
-        -- Hiển thị thông báo
-        Fluent:Notify({
-            Title = "Đã vào màn chơi",
-            Content = "Nhấn RightControl để hiện/ẩn giao diện",
-            Duration = 5
-        })
-    end
-end)
-
-game.Players.LocalPlayer.PlayerGui.ChildRemoved:Connect(function(child)
-    if child.Name == "GameGui" then
-        inGame = false
-    end
-end)
-
--- Thêm phím tắt (RightControl) để hiện/ẩn UI khi đang trong màn chơi
-game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.RightControl then
-        uiVisible = not uiVisible
-        
-        -- Hiển thị hoặc ẩn UI
-        pcall(function()
-            local FluentUI = game:GetService("CoreGui"):FindFirstChild("FluentUI")
-            if FluentUI then
-                FluentUI.Enabled = uiVisible
-            end
-        end)
-        
-        Fluent:Notify({
-            Title = uiVisible and "UI Đã Hiện" or "UI Đã Ẩn",
-            Content = uiVisible and "Giao diện đã được hiển thị" or "Giao diện đã được ẩn, nhấn RightControl để hiện lại",
-            Duration = 3
-        })
-    end
-end)
-
--- Thêm vào tab Macro nút để hiện UI khi đang chơi
-MacroSection:AddButton({
-    Title = "Force Show UI (In-Game)",
-    Callback = function()
-        pcall(function()
-            local FluentUI = game:GetService("CoreGui"):FindFirstChild("FluentUI")
-            if FluentUI then
-                FluentUI.Enabled = true
-                uiVisible = true
-                
-                Fluent:Notify({
-                    Title = "UI Đã Hiện",
-                    Content = "Giao diện đã được hiển thị lại",
-                    Duration = 3
-                })
-            end
-        end)
-    end
-})
-
--- Thêm nút hiển thị các phím tắt
-MacroSection:AddParagraph({
-    Title = "Phím Tắt",
-    Content = "LeftControl: Ẩn/hiện giao diện (Menu)\nRightControl: Ẩn/hiện giao diện (Trong màn chơi)"
-})
-
--- Kiểm tra game
-if game.PlaceId ~= 16146832113 then
-    Fluent:Notify({
-        Title = "Sai game!",
-        Content = "Script này chỉ hoạt động trong Anime Vanguards!",
-        Duration = 5
-    })
-    return
-end
 
 -- Thông báo khi script đã tải xong
 Fluent:Notify({
