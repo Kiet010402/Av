@@ -707,36 +707,147 @@ if not hookSuccess or not hookSupported then
         Content = "Executor của bạn không hỗ trợ hookmetamethod hoặc getnamecallmethod, tính năng ghi macro sẽ không hoạt động."
     })
 else
-    -- Hook vào UnitEvent để bắt các sự kiện unit
-    local hookSuccess, hookError = pcall(function()
-        local oldNamecall
-        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-            local args = {...}
-            local method = getnamecallmethod()
-            
-            if isRecording and method == "FireServer" and self == game:GetService("ReplicatedStorage").Networking.UnitEvent then
-                -- Ghi lại thông tin unit event
-                local action = args[1]
-                if action == "Render" or action == "Upgrade" or action == "Sell" then
-                    table.insert(currentMacro, {
-                        timestamp = tick(), -- Thời gian ghi
-                        action = action,
-                        args = args
-                    })
-                    print("Đã ghi lại thao tác: " .. action)
+    -- Cách theo dõi unit mới - sử dụng connections thay vì hook
+    local unitEventConnection = nil
+    
+    -- Hàm để bắt đầu theo dõi các sự kiện unit
+    local function startUnitEventTracking()
+        -- Ngắt kết nối cũ nếu có
+        if unitEventConnection then
+            unitEventConnection:Disconnect()
+            unitEventConnection = nil
+        end
+        
+        -- Kết nối sự kiện namecall cho tất cả RemoteEvents
+        unitEventConnection = game:GetService("ReplicatedStorage").DescendantAdded:Connect(function(desc)
+            if isRecording and desc:IsA("RemoteEvent") then
+                -- Theo dõi tất cả RemoteEvents trong ReplicatedStorage
+                local connection
+                connection = desc.OnClientEvent:Connect(function(...)
+                    local args = {...}
+                    -- Kiểm tra xem có phải là unit event không
+                    if isRecording and args and #args > 0 then
+                        local action = args[1]
+                        if action == "Render" or action == "Upgrade" or action == "Sell" then
+                            table.insert(currentMacro, {
+                                timestamp = tick(),
+                                action = action,
+                                args = args,
+                                path = desc:GetFullName()
+                            })
+                            print("Đã ghi lại thao tác: " .. action .. " từ " .. desc:GetFullName())
+                        end
+                    end
+                end)
+                
+                -- Lưu connection để có thể disconnect sau này
+                table.insert(unitConnections, connection)
+            end
+        end)
+        
+        -- Tự động bắt tất cả RemoteEvents hiện có
+        for _, desc in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+            if desc:IsA("RemoteEvent") then
+                local connection
+                connection = desc.OnClientEvent:Connect(function(...)
+                    local args = {...}
+                    -- Kiểm tra xem có phải là unit event không
+                    if isRecording and args and #args > 0 then
+                        local action = args[1]
+                        if action == "Render" or action == "Upgrade" or action == "Sell" then
+                            table.insert(currentMacro, {
+                                timestamp = tick(),
+                                action = action,
+                                args = args,
+                                path = desc:GetFullName()
+                            })
+                            print("Đã ghi lại thao tác: " .. action .. " từ " .. desc:GetFullName())
+                        end
+                    end
+                end)
+                
+                -- Lưu connection để có thể disconnect sau này
+                table.insert(unitConnections, connection)
+            end
+        end
+    end
+    
+    -- Hàm để dừng theo dõi các sự kiện unit
+    local function stopUnitEventTracking()
+        if unitEventConnection then
+            unitEventConnection:Disconnect()
+            unitEventConnection = nil
+        end
+        
+        -- Ngắt kết nối tất cả connections
+        for _, conn in ipairs(unitConnections) do
+            if conn then
+                conn:Disconnect()
+            end
+        end
+        
+        unitConnections = {}
+    end
+    
+    -- Bảng lưu trữ các connections
+    unitConnections = {}
+    
+    -- Theo dõi tất cả RemoteEvents được kích hoạt từ client
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local args = {...}
+        local method = getnamecallmethod()
+        
+        if isRecording and method == "FireServer" and self:IsA("RemoteEvent") then
+            -- Kiểm tra nếu đây là UnitEvent thông qua tên hoặc đường dẫn
+            local path = self:GetFullName()
+            if path:find("UnitEvent") or path:find("Unit") then
+                if args and #args > 0 then
+                    local action = args[1]
+                    if type(action) == "string" and (action == "Render" or action == "Upgrade" or action == "Sell") then
+                        table.insert(currentMacro, {
+                            timestamp = tick(),
+                            action = action,
+                            args = args,
+                            path = path
+                        })
+                        print("Đã ghi lại thao tác: " .. action .. " từ " .. path)
+                    end
                 end
             end
-            
-            return oldNamecall(self, ...)
-        end)
+        end
+        
+        return oldNamecall(self, ...)
     end)
     
-    if not hookSuccess then
-        MacroSection:AddParagraph({
-            Title = "Lỗi Hook",
-            Content = "Không thể hook vào game: " .. tostring(hookError)
-        })
-        hookSupported = false
+    -- Hook mouse input để ghi lại các thao tác click
+    local UserInputService = game:GetService("UserInputService")
+    local clickConnection = nil
+    
+    local function startMouseTracking()
+        if clickConnection then
+            clickConnection:Disconnect()
+            clickConnection = nil
+        end
+        
+        clickConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if isRecording and not gameProcessed and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                print("Đã ghi lại click chuột tại vị trí: " .. tostring(input.Position))
+                table.insert(currentMacro, {
+                    timestamp = tick(),
+                    action = "MouseClick",
+                    position = input.Position,
+                    isMouseEvent = true
+                })
+            end
+        end)
+    end
+    
+    local function stopMouseTracking()
+        if clickConnection then
+            clickConnection:Disconnect()
+            clickConnection = nil
+        end
     end
 end
 
@@ -771,12 +882,20 @@ MacroSection:AddToggle("RecordMacro", {
             -- Bắt đầu ghi mới
             currentMacro = {}
             
+            -- Bắt đầu theo dõi các sự kiện
+            if startUnitEventTracking then startUnitEventTracking() end
+            if startMouseTracking then startMouseTracking() end
+            
             Fluent:Notify({
                 Title = "Bắt đầu ghi",
                 Content = "Đang ghi lại macro: " .. selectedMacro,
                 Duration = 3
             })
         else
+            -- Dừng theo dõi các sự kiện
+            if stopUnitEventTracking then stopUnitEventTracking() end
+            if stopMouseTracking then stopMouseTracking() end
+            
             -- Kết thúc ghi và lưu
             if #currentMacro > 0 then
                 saveMacro(selectedMacro, currentMacro)
@@ -861,12 +980,58 @@ MacroSection:AddToggle("PlayMacro", {
                     
                     -- Thực hiện thao tác
                     pcall(function()
-                        if action.args and #action.args > 0 then
-                            game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(action.args))
+                        if action.isMouseEvent then
+                            -- Giả lập click chuột
+                            if action.action == "MouseClick" then
+                                game:GetService("VirtualInputManager"):SendMouseButtonEvent(
+                                    action.position.X, 
+                                    action.position.Y, 
+                                    0, -- Button (0 = left)
+                                    true, -- Down
+                                    game, 
+                                    1
+                                )
+                                wait(0.1) -- Giữ 0.1 giây
+                                game:GetService("VirtualInputManager"):SendMouseButtonEvent(
+                                    action.position.X, 
+                                    action.position.Y, 
+                                    0, -- Button (0 = left)
+                                    false, -- Up
+                                    game, 
+                                    1
+                                )
+                            end
+                        else
+                            -- Xác định RemoteEvent cần gọi
+                            local path = action.path
+                            local remoteEvent = nil
+                            
+                            if path then
+                                -- Tìm RemoteEvent theo đường dẫn
+                                local pathParts = string.split(path, ".")
+                                local current = game
+                                for _, part in ipairs(pathParts) do
+                                    current = current:FindFirstChild(part)
+                                    if not current then break end
+                                end
+                                
+                                if current and current:IsA("RemoteEvent") then
+                                    remoteEvent = current
+                                end
+                            else
+                                -- Thử tìm UnitEvent theo cách cũ
+                                remoteEvent = game:GetService("ReplicatedStorage"):FindFirstChild("Networking"):FindFirstChild("UnitEvent")
+                            end
+                            
+                            -- Thực thi FireServer nếu tìm thấy RemoteEvent
+                            if remoteEvent and action.args and #action.args > 0 then
+                                remoteEvent:FireServer(unpack(action.args))
+                                print("Đã phát thao tác " .. i .. "/" .. #currentMacro .. ": " .. (action.action or "Unknown"))
+                            else
+                                print("Không tìm thấy RemoteEvent cho thao tác " .. i)
+                            end
                         end
                     end)
-                    
-                    print("Đã phát thao tác " .. i .. "/" .. #currentMacro .. ": " .. action.action)
                 end
                 
                 -- Kết thúc phát
