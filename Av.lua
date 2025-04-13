@@ -494,6 +494,8 @@ local isPlaying = false
 local recordedActions = {}
 local macroList = {}
 local startRecordTime = 0
+local unitEventConnection = nil
+local oldNamecall = nil
 
 -- Hàm để lưu macro vào file
 local function saveMacroToFile(name, actions)
@@ -579,7 +581,8 @@ local function placeUnit(unitName, unitId, position, rotation)
         }
     }
     
-    game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+    local unitEvent = game:GetService("ReplicatedStorage"):WaitForChild("Networking"):WaitForChild("UnitEvent")
+    unitEvent:FireServer(unpack(args))
 end
 
 -- Hàm thực thi lệnh upgrade unit
@@ -589,7 +592,8 @@ local function upgradeUnit(unitId)
         [2] = unitId
     }
     
-    game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+    local unitEvent = game:GetService("ReplicatedStorage"):WaitForChild("Networking"):WaitForChild("UnitEvent")
+    unitEvent:FireServer(unpack(args))
 end
 
 -- Hàm thực thi lệnh sell unit
@@ -599,56 +603,82 @@ local function sellUnit(unitId)
         [2] = unitId
     }
     
-    game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+    local unitEvent = game:GetService("ReplicatedStorage"):WaitForChild("Networking"):WaitForChild("UnitEvent")
+    unitEvent:FireServer(unpack(args))
 end
 
--- Hook UnitEvent để ghi lại các hành động
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local args = {...}
-    local method = getnamecallmethod()
+-- Hàm bắt đầu ghi macro
+local function startRecording()
+    recordedActions = {}
+    startRecordTime = os.time()
     
-    if isRecording and method == "FireServer" and self == game:GetService("ReplicatedStorage").Networking.UnitEvent then
-        local action = args[1]
-        local data = args[2]
-        local currentTime = os.time() - startRecordTime
-        
-        if action == "Render" then
-            -- Place unit
-            table.insert(recordedActions, {
-                type = "place",
-                time = currentTime,
-                unitName = data[1],
-                unitId = data[2],
-                position = {
-                    x = data[3].X,
-                    y = data[3].Y,
-                    z = data[3].Z
-                },
-                rotation = data[4]
-            })
-            print("Recorded place action: " .. data[1])
-        elseif action == "Upgrade" then
-            -- Upgrade unit
-            table.insert(recordedActions, {
-                type = "upgrade",
-                time = currentTime,
-                unitId = data
-            })
-            print("Recorded upgrade action for unit: " .. data)
-        elseif action == "Sell" then
-            -- Sell unit
-            table.insert(recordedActions, {
-                type = "sell",
-                time = currentTime,
-                unitId = data
-            })
-            print("Recorded sell action for unit: " .. data)
-        end
+    -- Ngắt kết nối cũ nếu có
+    if unitEventConnection then
+        unitEventConnection:Disconnect()
+        unitEventConnection = nil
     end
     
-    return oldNamecall(self, ...)
-end)
+    print("Bắt đầu ghi macro")
+    
+    -- Sử dụng cách tiếp cận khác thay vì OnClientEvent
+    -- Dùng metatable hook để bắt lệnh
+    if not oldNamecall then
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local args = {...}
+            local method = getnamecallmethod()
+            local result = oldNamecall(self, ...)
+            
+            -- Kiểm tra sau khi đã gọi hàm gốc để không ảnh hưởng tới hành vi của game
+            if isRecording and method == "FireServer" and typeof(self) == "Instance" and 
+               self:IsA("RemoteEvent") and self.Name == "UnitEvent" and self.Parent and self.Parent.Name == "Networking" then
+                
+                local action = args[1]
+                local data = args[2]
+                local currentTime = os.time() - startRecordTime
+                
+                if action == "Render" then
+                    -- Place unit
+                    table.insert(recordedActions, {
+                        type = "place",
+                        time = currentTime,
+                        unitName = data[1],
+                        unitId = data[2],
+                        position = {
+                            x = data[3].X,
+                            y = data[3].Y,
+                            z = data[3].Z
+                        },
+                        rotation = data[4]
+                    })
+                    print("Recorded place action:", data[1])
+                elseif action == "Upgrade" then
+                    -- Upgrade unit
+                    table.insert(recordedActions, {
+                        type = "upgrade",
+                        time = currentTime,
+                        unitId = data
+                    })
+                    print("Recorded upgrade action for unit:", data)
+                elseif action == "Sell" then
+                    -- Sell unit
+                    table.insert(recordedActions, {
+                        type = "sell",
+                        time = currentTime,
+                        unitId = data
+                    })
+                    print("Recorded sell action for unit:", data)
+                end
+            end
+            
+            return result
+        end)
+    end
+end
+
+-- Hàm dừng ghi macro
+local function stopRecording(targetName)
+    print("Đã dừng ghi macro")
+end
 
 -- Input để nhập tên macro
 local MacroNameInput = MacroTab:AddInput("MacroName", {
@@ -716,8 +746,7 @@ MacroTab:AddToggle("RecordToggle", {
         
         if isRecording then
             -- Bắt đầu ghi
-            recordedActions = {}
-            startRecordTime = os.time()
+            startRecording()
             
             Fluent:Notify({
                 Title = "Recording Started",
@@ -737,6 +766,7 @@ MacroTab:AddToggle("RecordToggle", {
                 return
             end
             
+            stopRecording(targetName)
             local success = saveMacroToFile(targetName, recordedActions)
             
             if success then
