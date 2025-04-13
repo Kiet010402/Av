@@ -626,47 +626,57 @@ local function startRecording()
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             local args = {...}
             local method = getnamecallmethod()
+            
+            -- Gọi hàm gốc trước để không ảnh hưởng đến game
             local result = oldNamecall(self, ...)
             
-            -- Kiểm tra sau khi đã gọi hàm gốc để không ảnh hưởng tới hành vi của game
-            if isRecording and method == "FireServer" and typeof(self) == "Instance" and 
-               self:IsA("RemoteEvent") and self.Name == "UnitEvent" and self.Parent and self.Parent.Name == "Networking" then
-                
-                local action = args[1]
-                local data = args[2]
-                local currentTime = os.time() - startRecordTime
-                
-                if action == "Render" then
-                    -- Place unit
-                    table.insert(recordedActions, {
-                        type = "place",
-                        time = currentTime,
-                        unitName = data[1],
-                        unitId = data[2],
-                        position = {
-                            x = data[3].X,
-                            y = data[3].Y,
-                            z = data[3].Z
-                        },
-                        rotation = data[4]
-                    })
-                    print("Recorded place action:", data[1])
-                elseif action == "Upgrade" then
-                    -- Upgrade unit
-                    table.insert(recordedActions, {
-                        type = "upgrade",
-                        time = currentTime,
-                        unitId = data
-                    })
-                    print("Recorded upgrade action for unit:", data)
-                elseif action == "Sell" then
-                    -- Sell unit
-                    table.insert(recordedActions, {
-                        type = "sell",
-                        time = currentTime,
-                        unitId = data
-                    })
-                    print("Recorded sell action for unit:", data)
+            -- Kiểm tra sau khi đã gọi hàm gốc
+            if isRecording and method == "FireServer" and typeof(self) == "Instance" then
+                -- In thông tin để debug
+                if #args >= 2 then
+                    print("[DEBUG] Remote event:", self:GetFullName())
+                    print("[DEBUG] Action:", args[1])
+                    print("[DEBUG] Data type:", typeof(args[2]))
+                    
+                    -- Kiểm tra đường dẫn đầy đủ của remote
+                    if self:GetFullName() == "ReplicatedStorage.Networking.UnitEvent" then
+                        local action = args[1]
+                        local data = args[2]
+                        local currentTime = os.time() - startRecordTime
+                        
+                        if action == "Render" and typeof(data) == "table" and #data >= 4 then
+                            -- Place unit
+                            print("[RECORD] Placing unit:", data[1])
+                            table.insert(recordedActions, {
+                                type = "place",
+                                time = currentTime,
+                                unitName = data[1],
+                                unitId = data[2],
+                                position = {
+                                    x = data[3].X,
+                                    y = data[3].Y,
+                                    z = data[3].Z
+                                },
+                                rotation = data[4]
+                            })
+                        elseif action == "Upgrade" and data then
+                            -- Upgrade unit
+                            print("[RECORD] Upgrading unit:", tostring(data))
+                            table.insert(recordedActions, {
+                                type = "upgrade",
+                                time = currentTime,
+                                unitId = data
+                            })
+                        elseif action == "Sell" and data then
+                            -- Sell unit
+                            print("[RECORD] Selling unit:", tostring(data))
+                            table.insert(recordedActions, {
+                                type = "sell",
+                                time = currentTime,
+                                unitId = data
+                            })
+                        end
+                    end
                 end
             end
             
