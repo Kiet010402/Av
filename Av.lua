@@ -583,7 +583,7 @@ local macroNameInput = MacroTab:AddInput("MacroName", {
 })
 
 -- Label để hiển thị trạng thái ghi/phát
-local ActionDisplay = MacroTab:AddLabel({
+local ActionDisplay = MacroTab:AddParagraph({
     Title = "Status",
     Content = "No macro selected"
 })
@@ -749,16 +749,23 @@ function MacroSystem:LoadMacro(macroName)
     if macroName == "" then return false end
     
     local success, macroData = pcall(function()
-        local fileContent = readfile(MacroSystem.MacroFolder .. "/" .. macroName .. ".json")
+        local filePath = MacroSystem.MacroFolder .. "/" .. macroName .. ".json"
+        if not isfile(filePath) then
+            warn("File không tồn tại:", filePath)
+            return nil
+        end
+        local fileContent = readfile(filePath)
         return game:GetService("HttpService"):JSONDecode(fileContent)
     end)
     
     if success and macroData then
         MacroSystem.CurrentMacro = macroName
         MacroSystem.Actions = macroData.actions or {}
+        print("Đã tải macro thành công:", macroName, "#actions =", #MacroSystem.Actions)
         return true
     end
     
+    warn("Lỗi khi tải macro:", macroName)
     return false
 end
 
@@ -766,8 +773,14 @@ end
 function MacroSystem:DeleteMacro(macroName)
     if macroName == "" then return false end
     
+    local filePath = MacroSystem.MacroFolder .. "/" .. macroName .. ".json"
     local success = pcall(function()
-        delfile(MacroSystem.MacroFolder .. "/" .. macroName .. ".json")
+        if isfile(filePath) then
+            delfile(filePath)
+            print("Đã xóa macro:", filePath)
+        else
+            warn("File macro không tồn tại:", filePath)
+        end
     end)
     
     return success
@@ -784,11 +797,21 @@ function MacroSystem:AddAction(actionType, actionData)
     }
     
     table.insert(MacroSystem.Actions, action)
+    print("Đã thêm hành động:", actionType, "vào macro", MacroSystem.CurrentMacro)
     UpdateActionListDisplay()
 end
 
 -- Hàm phát lại macro
 function MacroSystem:PlayMacro()
+    if MacroSystem.CurrentMacro == "" then
+        Fluent:Notify({
+            Title = "Error",
+            Content = "No macro selected",
+            Duration = 3
+        })
+        return
+    end
+    
     if #MacroSystem.Actions == 0 then 
         Fluent:Notify({
             Title = "Macro Empty",
@@ -800,6 +823,7 @@ function MacroSystem:PlayMacro()
     
     MacroSystem.IsPlaying = true
     MacroSystem.PlayStartTime = os.time()
+    print("Bắt đầu phát macro:", MacroSystem.CurrentMacro, "với", #MacroSystem.Actions, "hành động")
     
     -- Thực hiện các hành động theo thời gian ghi
     for i, action in ipairs(MacroSystem.Actions) do
@@ -823,6 +847,7 @@ function MacroSystem:PlayMacro()
                     }
                 }
                 game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                print("Thực hiện hành động place:", action.data.unitName)
                 
             elseif action.type == "upgrade" then
                 local args = {
@@ -830,6 +855,7 @@ function MacroSystem:PlayMacro()
                     [2] = action.data.unitId
                 }
                 game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                print("Thực hiện hành động upgrade:", action.data.unitId)
                 
             elseif action.type == "sell" then
                 local args = {
@@ -837,6 +863,7 @@ function MacroSystem:PlayMacro()
                     [2] = action.data.unitId
                 }
                 game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                print("Thực hiện hành động sell:", action.data.unitId)
             end
             
             -- Cập nhật trạng thái hiện tại
@@ -863,6 +890,7 @@ function MacroSystem:PlayMacro()
             ActionDisplay.Title = "Status"
             ActionDisplay.Content = "Playback completed"
         end
+        print("Hoàn thành phát macro")
     end)
 end
 
