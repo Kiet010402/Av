@@ -498,9 +498,14 @@ MacroSystem.MacrosInFolder = {}
 
 -- Tạo thư mục nếu không tồn tại
 pcall(function()
+    if not isfolder("KaihonHubAV") then
+        makefolder("KaihonHubAV")
+    end
+    
     if not isfolder(MacroSystem.MacroFolder) then
         makefolder(MacroSystem.MacroFolder)
     end
+    print("Đã kiểm tra thư mục macro:", MacroSystem.MacroFolder)
 end)
 
 -- Hàm tải danh sách macro từ thư mục
@@ -513,11 +518,19 @@ function MacroSystem:LoadMacroList()
             return {}
         end
         
-        local files = listfiles(MacroSystem.MacroFolder)
-        for _, file in ipairs(files) do
+        local files = {}
+        
+        -- Thử liệt kê files
+        pcall(function()
+            files = listfiles(MacroSystem.MacroFolder)
+            print("Đã tìm thấy " .. #files .. " files trong thư mục macro")
+        end)
+        
+        for _, file in pairs(files) do
             -- Trích xuất tên file không có đường dẫn và phần mở rộng
             local fileName = string.match(file, "([^/\\]+)%.json$")
             if fileName then
+                print("Tìm thấy macro: " .. fileName)
                 table.insert(MacroSystem.MacrosInFolder, fileName)
             end
         end
@@ -541,14 +554,197 @@ function MacroSystem:SaveMacro(macroName)
         actions = MacroSystem.Actions
     }
     
-    local success = pcall(function()
-        writefile(MacroSystem.MacroFolder .. "/" .. macroName .. ".json", game:GetService("HttpService"):JSONEncode(macroData))
+    local success, err = pcall(function()
+        local filePath = MacroSystem.MacroFolder .. "/" .. macroName .. ".json"
+        local jsonData = game:GetService("HttpService"):JSONEncode(macroData)
+        writefile(filePath, jsonData)
+        print("Đã lưu macro vào:", filePath)
     end)
+    
+    if not success then
+        warn("Lỗi khi lưu macro:", err)
+        return false
+    end
     
     return success
 end
 
--- Hàm tải macro
+-- Input cho tên macro
+local macroNameInput = MacroTab:AddInput("MacroName", {
+    Title = "Macro Name",
+    Default = "",
+    Placeholder = "Enter macro name...",
+    Numeric = false,
+    Finished = true,
+    Callback = function(Value)
+        MacroSystem.CurrentMacro = Value
+        print("Đã đặt tên macro:", Value)
+    end
+})
+
+-- Label để hiển thị trạng thái ghi/phát
+local ActionDisplay = MacroTab:AddLabel({
+    Title = "Status",
+    Content = "No macro selected"
+})
+
+-- Nút tạo macro mới
+MacroTab:AddButton({
+    Title = "Create Macro",
+    Callback = function()
+        if MacroSystem.CurrentMacro == "" then
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Please enter a macro name",
+                Duration = 3
+            })
+            return
+        end
+        
+        -- Reset action list
+        MacroSystem.Actions = {}
+        
+        -- Lưu macro trống mới
+        local success = MacroSystem:SaveMacro(MacroSystem.CurrentMacro)
+        
+        if success then
+            Fluent:Notify({
+                Title = "Success",
+                Content = "Created new macro: " .. MacroSystem.CurrentMacro,
+                Duration = 3
+            })
+            
+            -- Refresh dropdown ngay sau khi tạo macro mới
+            local macros = MacroSystem:LoadMacroList()
+            if MacroDropdown then
+                pcall(function()
+                    print("Cập nhật dropdown với", #macros, "macro")
+                    if #macros == 0 then
+                        MacroDropdown:SetValues({"No macros found"})
+                    else
+                        MacroDropdown:SetValues(macros)
+                    end
+                end)
+            end
+        else
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Failed to create macro",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Tải danh sách macro
+local macros = MacroSystem:LoadMacroList() or {}
+print("Tải danh sách macro:", #macros, "macros")
+
+-- Dropdown để chọn macro
+local MacroDropdown = MacroTab:AddDropdown("MacroDropdown", {
+    Title = "Select Macro",
+    Values = #macros > 0 and macros or {"No macros found"},
+    Multi = false,
+    Default = 1,
+    Callback = function(Value)
+        if not Value or Value == "" or Value == "No macros found" then return end
+        
+        print("Đã chọn macro:", Value)
+        local success = MacroSystem:LoadMacro(Value)
+        
+        if success then
+            Fluent:Notify({
+                Title = "Success",
+                Content = "Loaded macro: " .. Value,
+                Duration = 3
+            })
+            
+            -- Update action display
+            UpdateActionListDisplay()
+            
+            -- Update input field
+            if macroNameInput then
+                pcall(function()
+                    macroNameInput:Set(Value)
+                end)
+            end
+        else
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Failed to load macro: " .. Value,
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Nút Delete Macro
+MacroTab:AddButton({
+    Title = "Delete Macro",
+    Callback = function()
+        if MacroSystem.CurrentMacro == "" then
+            Fluent:Notify({
+                Title = "Error",
+                Content = "No macro selected",
+                Duration = 3
+            })
+            return
+        end
+        
+        local success = MacroSystem:DeleteMacro(MacroSystem.CurrentMacro)
+        
+        if success then
+            Fluent:Notify({
+                Title = "Success",
+                Content = "Deleted macro: " .. MacroSystem.CurrentMacro,
+                Duration = 3
+            })
+            
+            -- Reset current macro
+            MacroSystem.CurrentMacro = ""
+            MacroSystem.Actions = {}
+            if macroNameInput then
+                pcall(function()
+                    macroNameInput:Set("")
+                end)
+            end
+            
+            -- Refresh dropdown immediately
+            local macros = MacroSystem:LoadMacroList()
+            if MacroDropdown then
+                pcall(function()
+                    if #macros == 0 then
+                        MacroDropdown:SetValues({"No macros found"})
+                    else
+                        MacroDropdown:SetValues(macros)
+                    end
+                end)
+            end
+        else
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Failed to delete macro",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Function to update action list display
+function UpdateActionListDisplay()
+    if not ActionDisplay then return end
+    
+    if #MacroSystem.Actions == 0 then
+        ActionDisplay.Title = "Status"
+        ActionDisplay.Content = "No actions recorded"
+        return
+    end
+    
+    local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
+    ActionDisplay.Title = "Status"
+    ActionDisplay.Content = "Last action: " .. lastAction.type .. " (Total: " .. #MacroSystem.Actions .. ")"
+end
+
 function MacroSystem:LoadMacro(macroName)
     if macroName == "" then return false end
     
@@ -714,114 +910,6 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return originalNamecall(self, ...)
 end)
 
--- Function to update action list display
-function UpdateActionListDisplay()
-    if not ActionDisplay then return end
-    
-    if #MacroSystem.Actions == 0 then
-        ActionDisplay.Title = "Status"
-        ActionDisplay.Content = "No actions recorded"
-        return
-    end
-    
-    local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
-    ActionDisplay.Title = "Status"
-    ActionDisplay.Content = "Last action: " .. lastAction.type .. " (Total: " .. #MacroSystem.Actions .. ")"
-end
-
--- Input cho tên macro
-local macroNameInput = MacroTab:AddInput("MacroName", {
-    Title = "Macro Name",
-    Default = "",
-    Placeholder = "Enter macro name...",
-    Numeric = false,
-    Finished = true,
-    Callback = function(Value)
-        MacroSystem.CurrentMacro = Value
-    end
-})
-
--- Nút tạo macro mới
-MacroTab:AddButton({
-    Title = "Create Macro",
-    Callback = function()
-        if MacroSystem.CurrentMacro == "" then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Please enter a macro name",
-                Duration = 3
-            })
-            return
-        end
-        
-        -- Reset action list
-        MacroSystem.Actions = {}
-        
-        -- Lưu macro trống mới
-        local success = MacroSystem:SaveMacro(MacroSystem.CurrentMacro)
-        
-        if success then
-            Fluent:Notify({
-                Title = "Success",
-                Content = "Created new macro: " .. MacroSystem.CurrentMacro,
-                Duration = 3
-            })
-            
-            -- Refresh dropdown
-            local macros = MacroSystem:LoadMacroList()
-            if #macros > 0 and MacroDropdown then
-                pcall(function()
-                    MacroDropdown:SetValues(macros)
-                end)
-            end
-        else
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Failed to create macro",
-                Duration = 3
-            })
-        end
-    end
-})
-
--- Dropdown để chọn macro
-local macros = MacroSystem:LoadMacroList() or {}
-local MacroDropdown = MacroTab:AddDropdown("MacroDropdown", {
-    Title = "Select Macro",
-    Values = macros,
-    Multi = false,
-    Default = 1,
-    Callback = function(Value)
-        if not Value or Value == "" then return end
-        
-        local success = MacroSystem:LoadMacro(Value)
-        
-        if success then
-            Fluent:Notify({
-                Title = "Success",
-                Content = "Loaded macro: " .. Value,
-                Duration = 3
-            })
-            
-            -- Update action display
-            UpdateActionListDisplay()
-            
-            -- Update input field
-            if macroNameInput then
-                pcall(function()
-                    macroNameInput:Set(Value)
-                end)
-            end
-        else
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Failed to load macro: " .. Value,
-                Duration = 3
-            })
-        end
-    end
-})
-
 -- Toggle Record Macro
 local RecordMacroToggle = MacroTab:AddToggle("RecordMacroToggle", {
     Title = "Record Macro",
@@ -907,58 +995,4 @@ local PlayMacroToggle = MacroTab:AddToggle("PlayMacroToggle", {
             })
         end
     end
-})
-
--- Nút Delete Macro
-MacroTab:AddButton({
-    Title = "Delete Macro",
-    Callback = function()
-        if MacroSystem.CurrentMacro == "" then
-            Fluent:Notify({
-                Title = "Error",
-                Content = "No macro selected",
-                Duration = 3
-            })
-            return
-        end
-        
-        local success = MacroSystem:DeleteMacro(MacroSystem.CurrentMacro)
-        
-        if success then
-            Fluent:Notify({
-                Title = "Success",
-                Content = "Deleted macro: " .. MacroSystem.CurrentMacro,
-                Duration = 3
-            })
-            
-            -- Reset current macro
-            MacroSystem.CurrentMacro = ""
-            MacroSystem.Actions = {}
-            if macroNameInput then
-                pcall(function()
-                    macroNameInput:Set("")
-                end)
-            end
-            
-            -- Refresh dropdown
-            local macros = MacroSystem:LoadMacroList()
-            if MacroDropdown then
-                pcall(function()
-                    MacroDropdown:SetValues(macros)
-                end)
-            end
-        else
-            Fluent:Notify({
-                Title = "Error",
-                Content = "Failed to delete macro",
-                Duration = 3
-            })
-        end
-    end
-})
-
--- Label để hiển thị trạng thái ghi/phát
-local ActionDisplay = MacroTab:AddLabel({
-    Title = "Status",
-    Content = "No macro selected"
 })
