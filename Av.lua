@@ -718,47 +718,34 @@ MacroSection:AddButton({
 -- Hook vào các sự kiện để ghi lại macro
 local function HookEvents()
     local UnitEvent = game:GetService("ReplicatedStorage").Networking.UnitEvent
+    local oldFireServer = UnitEvent.FireServer
     
-    -- Hook sự kiện Place Unit
-    local oldPlace = UnitEvent.FireServer
     UnitEvent.FireServer = function(self, ...)
         local args = {...}
-        if isRecording and args[1] == "Render" then
-            table.insert(recordedActions, {
-                type = "place",
-                unitName = args[2][1],
-                level = args[2][2],
-                position = args[2][3],
-                rotation = args[2][4]
-            })
+        
+        if isRecording then
+            if args[1] == "Render" then
+                table.insert(recordedActions, {
+                    type = "place",
+                    unitName = args[2][1],
+                    level = args[2][2],
+                    position = args[2][3],
+                    rotation = args[2][4]
+                })
+            elseif args[1] == "Upgrade" then
+                table.insert(recordedActions, {
+                    type = "upgrade",
+                    unitId = args[2]
+                })
+            elseif args[1] == "Sell" then
+                table.insert(recordedActions, {
+                    type = "sell",
+                    unitId = args[2]
+                })
+            end
         end
-        return oldPlace(self, ...)
-    end
-    
-    -- Hook sự kiện Upgrade Unit
-    local oldUpgrade = UnitEvent.FireServer
-    UnitEvent.FireServer = function(self, ...)
-        local args = {...}
-        if isRecording and args[1] == "Upgrade" then
-            table.insert(recordedActions, {
-                type = "upgrade",
-                unitId = args[2]
-            })
-        end
-        return oldUpgrade(self, ...)
-    end
-    
-    -- Hook sự kiện Sell Unit
-    local oldSell = UnitEvent.FireServer
-    UnitEvent.FireServer = function(self, ...)
-        local args = {...}
-        if isRecording and args[1] == "Sell" then
-            table.insert(recordedActions, {
-                type = "sell",
-                unitId = args[2]
-            })
-        end
-        return oldSell(self, ...)
+        
+        return oldFireServer(self, unpack(args))
     end
 end
 
