@@ -734,15 +734,17 @@ MacroTab:AddButton({
 function UpdateActionListDisplay()
     if not ActionDisplay then return end
     
-    if #MacroSystem.Actions == 0 then
+    pcall(function()
+        if #MacroSystem.Actions == 0 then
+            ActionDisplay.Title = "Status"
+            ActionDisplay.Content = "No actions recorded"
+            return
+        end
+        
+        local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
         ActionDisplay.Title = "Status"
-        ActionDisplay.Content = "No actions recorded"
-        return
-    end
-    
-    local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
-    ActionDisplay.Title = "Status"
-    ActionDisplay.Content = "Last action: " .. lastAction.type .. " (Total: " .. #MacroSystem.Actions .. ")"
+        ActionDisplay.Content = "Last action: " .. lastAction.type .. " (Total: " .. #MacroSystem.Actions .. ")"
+    end)
 end
 
 function MacroSystem:LoadMacro(macroName)
@@ -793,7 +795,7 @@ function MacroSystem:AddAction(actionType, actionData)
     local action = {
         type = actionType,
         data = actionData,
-        time = os.time() - MacroSystem.RecordStartTime
+        time = tick() - MacroSystem.RecordStartTime
     }
     
     table.insert(MacroSystem.Actions, action)
@@ -822,7 +824,7 @@ function MacroSystem:PlayMacro()
     end
     
     MacroSystem.IsPlaying = true
-    MacroSystem.PlayStartTime = os.time()
+    MacroSystem.PlayStartTime = tick()
     print("Bắt đầu phát macro:", MacroSystem.CurrentMacro, "với", #MacroSystem.Actions, "hành động")
     
     -- Thực hiện các hành động theo thời gian ghi
@@ -868,8 +870,10 @@ function MacroSystem:PlayMacro()
             
             -- Cập nhật trạng thái hiện tại
             if ActionDisplay then
-                ActionDisplay.Title = "Status"
-                ActionDisplay.Content = "Action: " .. i .. "/" .. #MacroSystem.Actions .. " - " .. action.type
+                pcall(function()
+                    ActionDisplay.Title = "Status"
+                    ActionDisplay.Content = "Action: " .. i .. "/" .. #MacroSystem.Actions .. " - " .. action.type
+                end)
             end
         end)
     end
@@ -880,6 +884,9 @@ function MacroSystem:PlayMacro()
         local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
         local waitTime = lastAction and lastAction.time + 1 or 1
         wait(waitTime)
+        
+        if not MacroSystem.IsPlaying then return end
+        
         MacroSystem.IsPlaying = false
         if PlayMacroToggle then
             pcall(function()
@@ -887,8 +894,10 @@ function MacroSystem:PlayMacro()
             end)
         end
         if ActionDisplay then
-            ActionDisplay.Title = "Status"
-            ActionDisplay.Content = "Playback completed"
+            pcall(function()
+                ActionDisplay.Title = "Status"
+                ActionDisplay.Content = "Playback completed"
+            end)
         end
         print("Hoàn thành phát macro")
     end)
@@ -912,7 +921,10 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 rotation = unitData[4]
             })
             if ActionDisplay then
-                ActionDisplay.Content = "Recorded: Place " .. unitData[1]
+                pcall(function()
+                    ActionDisplay.Title = "Status"
+                    ActionDisplay.Content = "Recorded: Place " .. unitData[1]
+                end)
             end
             
         elseif actionType == "Upgrade" then -- Upgrade unit
@@ -921,7 +933,10 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 unitId = unitId
             })
             if ActionDisplay then
-                ActionDisplay.Content = "Recorded: Upgrade unit " .. tostring(unitId)
+                pcall(function()
+                    ActionDisplay.Title = "Status"
+                    ActionDisplay.Content = "Recorded: Upgrade unit " .. tostring(unitId)
+                end)
             end
             
         elseif actionType == "Sell" then -- Sell unit
@@ -930,7 +945,10 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 unitId = unitId
             })
             if ActionDisplay then
-                ActionDisplay.Content = "Recorded: Sell unit " .. tostring(unitId)
+                pcall(function()
+                    ActionDisplay.Title = "Status"
+                    ActionDisplay.Content = "Recorded: Sell unit " .. tostring(unitId)
+                end)
             end
         end
     end
@@ -958,7 +976,7 @@ local RecordMacroToggle = MacroTab:AddToggle("RecordMacroToggle", {
             
             -- Bắt đầu ghi
             MacroSystem.Actions = {}
-            MacroSystem.RecordStartTime = os.time()
+            MacroSystem.RecordStartTime = tick()
             
             Fluent:Notify({
                 Title = "Recording Started",
@@ -968,8 +986,10 @@ local RecordMacroToggle = MacroTab:AddToggle("RecordMacroToggle", {
             
             -- Reset display
             if ActionDisplay then
-                ActionDisplay.Title = "Status"
-                ActionDisplay.Content = "Recording started... Place, upgrade or sell units"
+                pcall(function()
+                    ActionDisplay.Title = "Status"
+                    ActionDisplay.Content = "Recording started... Place, upgrade or sell units"
+                end)
             end
         else
             -- Dừng ghi và lưu
