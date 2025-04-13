@@ -544,7 +544,18 @@ end
 -- Hàm để làm mới danh sách macro
 local function refreshMacroList()
     macroList = {}
-    local files = listfiles()
+    local success, files = pcall(function()
+        if listfiles then
+            return listfiles("./")  -- Thêm đường dẫn hiện tại "./"
+        else
+            return {}
+        end
+    end)
+    
+    if not success or not files then
+        warn("Không thể liệt kê files: ", tostring(files))
+        return {}
+    end
     
     for _, file in ipairs(files) do
         local macroMatch = string.match(file, "KaihonAV_Macro_(.+)%.json$")
