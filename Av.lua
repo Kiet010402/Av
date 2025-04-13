@@ -73,226 +73,6 @@ end
 -- Tải cấu hình khi khởi động
 ConfigSystem.LoadConfig()
 
--- Hệ thống Macro
-local MacroSystem = {}
-MacroSystem.MacrosFolder = "KaihonAV_Macros"
-MacroSystem.CurrentMacro = ""
-MacroSystem.Recording = false
-MacroSystem.Playing = false
-MacroSystem.MacrosList = {}
-MacroSystem.RecordedActions = {}
-MacroSystem.PlaybackIndex = 1
-MacroSystem.SelectedMacro = nil
-
--- Tạo thư mục macro nếu chưa tồn tại
-local success, error = pcall(function()
-    if not isfolder(MacroSystem.MacrosFolder) then
-        makefolder(MacroSystem.MacrosFolder)
-    end
-end)
-if not success then
-    warn("Không thể tạo thư mục macro:", error)
-end
-
--- Hàm để lưu macro
-MacroSystem.SaveMacro = function(name, actions)
-    local success, err = pcall(function()
-        local macroData = {
-            name = name,
-            actions = actions,
-            timestamp = os.time()
-        }
-        writefile(MacroSystem.MacrosFolder .. "/" .. name .. ".json", game:GetService("HttpService"):JSONEncode(macroData))
-    end)
-    if success then
-        print("Đã lưu macro thành công:", name)
-        return true
-    else
-        warn("Lưu macro thất bại:", err)
-        return false
-    end
-end
-
--- Hàm để tải macro
-MacroSystem.LoadMacro = function(name)
-    local success, content = pcall(function()
-        local path = MacroSystem.MacrosFolder .. "/" .. name .. ".json"
-        if isfile(path) then
-            return readfile(path)
-        end
-        return nil
-    end)
-    
-    if success and content then
-        local data = game:GetService("HttpService"):JSONDecode(content)
-        print("Đã tải macro:", name)
-        return data
-    else
-        warn("Tải macro thất bại:", name)
-        return nil
-    end
-end
-
--- Hàm để lấy danh sách tất cả các macro
-MacroSystem.GetAllMacros = function()
-    local macros = {}
-    local success, files = pcall(function()
-        return listfiles(MacroSystem.MacrosFolder)
-    end)
-    
-    if success then
-        for _, file in ipairs(files) do
-            if file:sub(-5) == ".json" then
-                local macroName = file:match("([^/\\]+)%.json$")
-                table.insert(macros, macroName)
-            end
-        end
-    else
-        warn("Không thể lấy danh sách macro")
-    end
-    
-    MacroSystem.MacrosList = macros
-    return macros
-end
-
--- Hàm để ghi lại hành động place unit
-MacroSystem.RecordPlaceUnit = function(unit, slot, position, rotation)
-    if MacroSystem.Recording then
-        table.insert(MacroSystem.RecordedActions, {
-            type = "place",
-            timestamp = os.clock(),
-            unit = unit,
-            slot = slot,
-            position = position,
-            rotation = rotation
-        })
-        print("Đã ghi lại: Place Unit", unit)
-    end
-end
-
--- Hàm để ghi lại hành động upgrade unit
-MacroSystem.RecordUpgradeUnit = function(unitId)
-    if MacroSystem.Recording then
-        table.insert(MacroSystem.RecordedActions, {
-            type = "upgrade",
-            timestamp = os.clock(),
-            unitId = unitId
-        })
-        print("Đã ghi lại: Upgrade Unit", unitId)
-    end
-end
-
--- Hàm để ghi lại hành động sell unit
-MacroSystem.RecordSellUnit = function(unitId)
-    if MacroSystem.Recording then
-        table.insert(MacroSystem.RecordedActions, {
-            type = "sell",
-            timestamp = os.clock(),
-            unitId = unitId
-        })
-        print("Đã ghi lại: Sell Unit", unitId)
-    end
-end
-
--- Hook vào các event của game để ghi lại hành động
-local unitEvent = game:GetService("ReplicatedStorage"):WaitForChild("Networking"):WaitForChild("UnitEvent")
-
--- Tạo hook cho UnitEvent
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local args = {...}
-    local method = getnamecallmethod()
-    
-    if MacroSystem.Recording and self == unitEvent and method == "FireServer" then
-        local eventType = args[1]
-        if eventType == "Render" then
-            -- Place Unit
-            MacroSystem.RecordPlaceUnit(args[2][1], args[2][2], args[2][3], args[2][4])
-        elseif eventType == "Upgrade" then
-            -- Upgrade Unit
-            MacroSystem.RecordUpgradeUnit(args[2])
-        elseif eventType == "Sell" then
-            -- Sell Unit
-            MacroSystem.RecordSellUnit(args[2])
-        end
-    end
-    
-    return oldNamecall(self, ...)
-end)
-
--- Hàm để phát lại macro
-MacroSystem.PlayMacro = function()
-    if not MacroSystem.SelectedMacro or MacroSystem.Recording then return end
-    
-    local macroData = MacroSystem.LoadMacro(MacroSystem.SelectedMacro)
-    if not macroData then return end
-    
-    local actions = macroData.actions
-    MacroSystem.Playing = true
-    MacroSystem.PlaybackIndex = 1
-    
-    local startTime = os.clock()
-    
-    -- Tạo một task để phát lại macro
-    task.spawn(function()
-        while MacroSystem.Playing and MacroSystem.PlaybackIndex <= #actions do
-            local action = actions[MacroSystem.PlaybackIndex]
-            local currentTime = os.clock() - startTime
-            
-            if action.timestamp <= currentTime then
-                if action.type == "place" then
-                    -- Phát lại place unit
-                    local args = {
-                        [1] = "Render",
-                        [2] = {
-                            [1] = action.unit,
-                            [2] = action.slot,
-                            [3] = action.position,
-                            [4] = action.rotation
-                        }
-                    }
-                    unitEvent:FireServer(unpack(args))
-                    print("Phát lại: Place Unit", action.unit)
-                elseif action.type == "upgrade" then
-                    -- Phát lại upgrade unit
-                    local args = {
-                        [1] = "Upgrade",
-                        [2] = action.unitId
-                    }
-                    unitEvent:FireServer(unpack(args))
-                    print("Phát lại: Upgrade Unit", action.unitId)
-                elseif action.type == "sell" then
-                    -- Phát lại sell unit
-                    local args = {
-                        [1] = "Sell",
-                        [2] = action.unitId
-                    }
-                    unitEvent:FireServer(unpack(args))
-                    print("Phát lại: Sell Unit", action.unitId)
-                end
-                
-                MacroSystem.PlaybackIndex = MacroSystem.PlaybackIndex + 1
-            end
-            
-            task.wait(0.01) -- Đợi một chút để không làm tràn task
-        end
-        
-        if MacroSystem.Playing then
-            MacroSystem.Playing = false
-            Fluent:Notify({
-                Title = "Phát Macro",
-                Content = "Đã phát hết macro " .. MacroSystem.SelectedMacro,
-                Duration = 3
-            })
-        end
-    end)
-end
-
--- Hàm để dừng phát macro
-MacroSystem.StopPlayback = function()
-    MacroSystem.Playing = false
-end
-
 -- Biến lưu trạng thái Maps
 local selectedStage = ConfigSystem.CurrentConfig.SelectedStage or "Stage1"
 local selectedDifficulty = ConfigSystem.CurrentConfig.SelectedDifficulty or "Normal"
@@ -304,6 +84,14 @@ local autoStartEnabled = ConfigSystem.CurrentConfig.AutoStartEnabled or false
 local selectedSummonType = ConfigSystem.CurrentConfig.SelectedSummonType or "Special"
 local summonAmount = ConfigSystem.CurrentConfig.SummonAmount or 1
 local isSummoning = ConfigSystem.CurrentConfig.IsSummoning or false
+
+-- Biến lưu trạng thái Macro
+local macroName = ""
+local selectedMacro = ""
+local isRecording = false
+local isPlaying = false
+local recordedActions = {}
+local currentMacro = nil
 
 -- Cấu hình UI
 local Window = Fluent:CreateWindow({
@@ -325,8 +113,11 @@ local SummonTab = Window:AddTab({ Title = "Summon", Icon = "rbxassetid://1331179
 -- Tạo tab Maps
 local MapsTab = Window:AddTab({ Title = "Maps", Icon = "rbxassetid://13311793824" })
 
+-- Tạo tab Settings
+local SettingsTab = Window:AddTab({ Title = "Settings", Icon = "rbxassetid://13311798537" })
+
 -- Tạo tab Macro
-local MacroTab = Window:AddTab({ Title = "Macro", Icon = "rbxassetid://13311795744" })
+local MacroTab = Window:AddTab({ Title = "Macro", Icon = "rbxassetid://13311793824" })
 
 -- Tạo tab Settings
 local SettingsTab = Window:AddTab({ Title = "Settings", Icon = "rbxassetid://13311798537" })
@@ -338,7 +129,7 @@ local SummonSection = SummonTab:AddSection("Summon Settings")
 local StorySection = MapsTab:AddSection("Story Maps")
 
 -- Section Macro
-local MacroSection = MacroTab:AddSection("Macro Controls")
+local MacroSection = MacroTab:AddSection("Macro Settings")
 
 -- Mapping cho stages và maps
 local stageMapping = {
@@ -349,161 +140,6 @@ local stageMapping = {
     ["Stage5"] = "Underground Church",
     ["Stage6"] = "Spirit Society"
 }
-
--- Input để nhập tên macro
-local macroNameInput = ""
-MacroSection:AddInput("MacroName", {
-    Title = "Macro Name",
-    Default = "",
-    Placeholder = "Enter macro name...",
-    Numeric = false,
-    Finished = true,
-    Callback = function(Value)
-        macroNameInput = Value
-    end
-})
-
--- Nút để tạo macro mới
-MacroSection:AddButton({
-    Title = "Create Macro",
-    Callback = function()
-        if macroNameInput == "" then
-            Fluent:Notify({
-                Title = "Lỗi",
-                Content = "Vui lòng nhập tên cho macro!",
-                Duration = 3
-            })
-            return
-        end
-        
-        MacroSystem.CurrentMacro = macroNameInput
-        MacroSystem.RecordedActions = {}
-        
-        Fluent:Notify({
-            Title = "Tạo Macro",
-            Content = "Đã tạo macro mới: " .. MacroSystem.CurrentMacro,
-            Duration = 3
-        })
-        
-        -- Cập nhật dropdown
-        MacroSystem.GetAllMacros()
-        local macroDropdown = Fluent.Options.MacroDropdown
-        if macroDropdown then
-            macroDropdown:SetValues(MacroSystem.MacrosList)
-        end
-    end
-})
-
--- Dropdown để chọn macro
-MacroSection:AddDropdown("MacroDropdown", {
-    Title = "Select Macro",
-    Values = MacroSystem.GetAllMacros(),
-    Multi = false,
-    Default = 1,
-    Callback = function(Value)
-        MacroSystem.SelectedMacro = Value
-        print("Selected Macro: " .. Value)
-    end
-})
-
--- Toggle để bắt đầu/dừng ghi macro
-MacroSection:AddToggle("RecordToggle", {
-    Title = "Record Macro",
-    Default = false,
-    Callback = function(Value)
-        if Value then
-            if MacroSystem.CurrentMacro == "" then
-                Fluent:Notify({
-                    Title = "Lỗi",
-                    Content = "Vui lòng tạo hoặc chọn một macro trước khi ghi!",
-                    Duration = 3
-                })
-                return false -- Không cho phép bật toggle
-            end
-            
-            MacroSystem.Recording = true
-            MacroSystem.RecordedActions = {}
-            Fluent:Notify({
-                Title = "Ghi Macro",
-                Content = "Đang ghi macro: " .. MacroSystem.CurrentMacro,
-                Duration = 3
-            })
-        else
-            MacroSystem.Recording = false
-            if #MacroSystem.RecordedActions > 0 then
-                MacroSystem.SaveMacro(MacroSystem.CurrentMacro, MacroSystem.RecordedActions)
-                Fluent:Notify({
-                    Title = "Ghi Macro",
-                    Content = "Đã lưu macro: " .. MacroSystem.CurrentMacro .. " với " .. #MacroSystem.RecordedActions .. " hành động",
-                    Duration = 3
-                })
-                
-                -- Cập nhật dropdown
-                MacroSystem.GetAllMacros()
-                local macroDropdown = Fluent.Options.MacroDropdown
-                if macroDropdown then
-                    macroDropdown:SetValues(MacroSystem.MacrosList)
-                end
-            else
-                Fluent:Notify({
-                    Title = "Ghi Macro",
-                    Content = "Đã dừng ghi macro (không có hành động nào được ghi lại)",
-                    Duration = 3
-                })
-            end
-        end
-    end
-})
-
--- Toggle để bắt đầu/dừng phát macro
-MacroSection:AddToggle("PlayToggle", {
-    Title = "Play Macro",
-    Default = false,
-    Callback = function(Value)
-        if Value then
-            if not MacroSystem.SelectedMacro then
-                Fluent:Notify({
-                    Title = "Lỗi",
-                    Content = "Vui lòng chọn một macro để phát!",
-                    Duration = 3
-                })
-                return false -- Không cho phép bật toggle
-            end
-            
-            MacroSystem.Playing = true
-            MacroSystem.PlayMacro()
-            Fluent:Notify({
-                Title = "Phát Macro",
-                Content = "Đang phát macro: " .. MacroSystem.SelectedMacro,
-                Duration = 3
-            })
-        else
-            MacroSystem.StopPlayback()
-            Fluent:Notify({
-                Title = "Phát Macro",
-                Content = "Đã dừng phát macro",
-                Duration = 3
-            })
-        end
-    end
-})
-
--- Nút để làm mới danh sách macro
-MacroSection:AddButton({
-    Title = "Refresh Macro List",
-    Callback = function()
-        MacroSystem.GetAllMacros()
-        local macroDropdown = Fluent.Options.MacroDropdown
-        if macroDropdown then
-            macroDropdown:SetValues(MacroSystem.MacrosList)
-        end
-        Fluent:Notify({
-            Title = "Làm mới",
-            Content = "Đã cập nhật danh sách macro",
-            Duration = 3
-        })
-    end
-})
 
 -- Dropdown để chọn Stage
 StorySection:AddDropdown("StageDropdown", {
@@ -785,7 +421,7 @@ AutoSaveConfig()
 
 -- Thêm event listener để lưu ngay khi thay đổi giá trị
 local function setupSaveEvents()
-    for _, tab in pairs({MainTab, SummonTab, MapsTab, MacroTab, SettingsTab}) do
+    for _, tab in pairs({MainTab, SummonTab, MapsTab, SettingsTab}) do
         if tab and tab._components then
             for _, element in pairs(tab._components) do
                 if element and element.OnChanged then
@@ -860,3 +496,274 @@ Fluent:Notify({
     Content = "Script đã tải thành công! Đã tải cấu hình cho " .. playerName,
     Duration = 3
 })
+
+-- Input để đặt tên macro
+MacroSection:AddInput("MacroName", {
+    Title = "Macro Name",
+    Default = "",
+    Placeholder = "Enter macro name",
+    Callback = function(Value)
+        macroName = Value
+    end
+})
+
+-- Button để tạo macro mới
+MacroSection:AddButton({
+    Title = "Create Macro",
+    Callback = function()
+        if macroName == "" then
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Please enter a macro name",
+                Duration = 3
+            })
+            return
+        end
+        
+        local macroFile = "KaihonAVMacro_" .. macroName .. ".json"
+        if isfile(macroFile) then
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Macro name already exists",
+                Duration = 3
+            })
+            return
+        end
+        
+        -- Tạo file macro mới
+        local newMacro = {
+            name = macroName,
+            actions = {}
+        }
+        
+        writefile(macroFile, game:GetService("HttpService"):JSONEncode(newMacro))
+        
+        Fluent:Notify({
+            Title = "Success",
+            Content = "Created new macro: " .. macroName,
+            Duration = 3
+        })
+        
+        -- Cập nhật dropdown
+        UpdateMacroDropdown()
+    end
+})
+
+-- Hàm cập nhật dropdown macro
+local function UpdateMacroDropdown()
+    local macros = {}
+    for _, file in pairs(listfiles()) do
+        if file:match("KaihonAVMacro_(.+)%.json") then
+            local name = file:match("KaihonAVMacro_(.+)%.json")
+            table.insert(macros, name)
+        end
+    end
+    
+    MacroSection:UpdateDropdown("MacroDropdown", {
+        Title = "Select Macro",
+        Values = macros,
+        Multi = false,
+        Default = 1,
+        Callback = function(Value)
+            selectedMacro = Value
+            -- Tải macro đã chọn
+            LoadMacro(Value)
+        end
+    })
+end
+
+-- Hàm tải macro
+local function LoadMacro(macroName)
+    local macroFile = "KaihonAVMacro_" .. macroName .. ".json"
+    if isfile(macroFile) then
+        local content = readfile(macroFile)
+        currentMacro = game:GetService("HttpService"):JSONDecode(content)
+    end
+end
+
+-- Dropdown để chọn macro
+MacroSection:AddDropdown("MacroDropdown", {
+    Title = "Select Macro",
+    Values = {},
+    Multi = false,
+    Default = 1,
+    Callback = function(Value)
+        selectedMacro = Value
+        LoadMacro(Value)
+    end
+})
+
+-- Toggle để bật/tắt Record
+MacroSection:AddToggle("RecordToggle", {
+    Title = "Record Macro",
+    Default = false,
+    Callback = function(Value)
+        isRecording = Value
+        if Value then
+            recordedActions = {}
+            Fluent:Notify({
+                Title = "Recording",
+                Content = "Started recording macro",
+                Duration = 3
+            })
+        else
+            -- Lưu macro khi dừng record
+            if currentMacro then
+                currentMacro.actions = recordedActions
+                local macroFile = "KaihonAVMacro_" .. currentMacro.name .. ".json"
+                writefile(macroFile, game:GetService("HttpService"):JSONEncode(currentMacro))
+                
+                Fluent:Notify({
+                    Title = "Recording Stopped",
+                    Content = "Saved macro: " .. currentMacro.name,
+                    Duration = 3
+                })
+            end
+        end
+    end
+})
+
+-- Toggle để bật/tắt Play
+MacroSection:AddToggle("PlayToggle", {
+    Title = "Play Macro",
+    Default = false,
+    Callback = function(Value)
+        isPlaying = Value
+        if Value and currentMacro then
+            Fluent:Notify({
+                Title = "Playing",
+                Content = "Started playing macro: " .. currentMacro.name,
+                Duration = 3
+            })
+            
+            -- Tạo coroutine để chạy macro
+            spawn(function()
+                for _, action in pairs(currentMacro.actions) do
+                    if not isPlaying then break end
+                    
+                    if action.type == "place" then
+                        local args = {
+                            [1] = "Render",
+                            [2] = {
+                                [1] = action.unitName,
+                                [2] = action.level,
+                                [3] = action.position,
+                                [4] = action.rotation
+                            }
+                        }
+                        game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                    elseif action.type == "upgrade" then
+                        local args = {
+                            [1] = "Upgrade",
+                            [2] = action.unitId
+                        }
+                        game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                    elseif action.type == "sell" then
+                        local args = {
+                            [1] = "Sell",
+                            [2] = action.unitId
+                        }
+                        game:GetService("ReplicatedStorage").Networking.UnitEvent:FireServer(unpack(args))
+                    end
+                    
+                    wait(0.1) -- Đợi 0.1 giây giữa các action
+                end
+                
+                isPlaying = false
+                Fluent:Notify({
+                    Title = "Playback Complete",
+                    Content = "Finished playing macro: " .. currentMacro.name,
+                    Duration = 3
+                })
+            end)
+        else
+            Fluent:Notify({
+                Title = "Playback Stopped",
+                Content = "Stopped playing macro",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Button để xóa macro
+MacroSection:AddButton({
+    Title = "Delete Macro",
+    Callback = function()
+        if selectedMacro == "" then
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Please select a macro to delete",
+                Duration = 3
+            })
+            return
+        end
+        
+        local macroFile = "KaihonAVMacro_" .. selectedMacro .. ".json"
+        if isfile(macroFile) then
+            delfile(macroFile)
+            selectedMacro = ""
+            currentMacro = nil
+            UpdateMacroDropdown()
+            
+            Fluent:Notify({
+                Title = "Success",
+                Content = "Deleted macro: " .. selectedMacro,
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Hook vào các sự kiện để ghi lại macro
+local function HookEvents()
+    local UnitEvent = game:GetService("ReplicatedStorage").Networking.UnitEvent
+    
+    -- Hook sự kiện Place Unit
+    local oldPlace = UnitEvent.FireServer
+    UnitEvent.FireServer = function(self, ...)
+        local args = {...}
+        if isRecording and args[1] == "Render" then
+            table.insert(recordedActions, {
+                type = "place",
+                unitName = args[2][1],
+                level = args[2][2],
+                position = args[2][3],
+                rotation = args[2][4]
+            })
+        end
+        return oldPlace(self, ...)
+    end
+    
+    -- Hook sự kiện Upgrade Unit
+    local oldUpgrade = UnitEvent.FireServer
+    UnitEvent.FireServer = function(self, ...)
+        local args = {...}
+        if isRecording and args[1] == "Upgrade" then
+            table.insert(recordedActions, {
+                type = "upgrade",
+                unitId = args[2]
+            })
+        end
+        return oldUpgrade(self, ...)
+    end
+    
+    -- Hook sự kiện Sell Unit
+    local oldSell = UnitEvent.FireServer
+    UnitEvent.FireServer = function(self, ...)
+        local args = {...}
+        if isRecording and args[1] == "Sell" then
+            table.insert(recordedActions, {
+                type = "sell",
+                unitId = args[2]
+            })
+        end
+        return oldSell(self, ...)
+    end
+end
+
+-- Khởi tạo hook events
+HookEvents()
+
+-- Cập nhật dropdown macro khi khởi động
+UpdateMacroDropdown()
