@@ -507,7 +507,12 @@ end)
 function MacroSystem:LoadMacroList()
     MacroSystem.MacrosInFolder = {}
     
-    pcall(function()
+    local success, result = pcall(function()
+        if not isfolder(MacroSystem.MacroFolder) then
+            makefolder(MacroSystem.MacroFolder)
+            return {}
+        end
+        
         local files = listfiles(MacroSystem.MacroFolder)
         for _, file in ipairs(files) do
             -- Trích xuất tên file không có đường dẫn và phần mở rộng
@@ -516,9 +521,15 @@ function MacroSystem:LoadMacroList()
                 table.insert(MacroSystem.MacrosInFolder, fileName)
             end
         end
+        return MacroSystem.MacrosInFolder
     end)
     
-    return MacroSystem.MacrosInFolder
+    if not success then
+        warn("Lỗi khi tải danh sách macro:", result)
+        return {}
+    end
+    
+    return result
 end
 
 -- Hàm lưu macro
@@ -633,19 +644,29 @@ function MacroSystem:PlayMacro()
             end
             
             -- Cập nhật trạng thái hiện tại
-            ActionDisplay.Title = "Status"
-            ActionDisplay.Content = "Action: " .. i .. "/" .. #MacroSystem.Actions .. " - " .. action.type
+            if ActionDisplay then
+                ActionDisplay.Title = "Status"
+                ActionDisplay.Content = "Action: " .. i .. "/" .. #MacroSystem.Actions .. " - " .. action.type
+            end
         end)
     end
     
     -- Dừng macro sau khi hoàn thành
     spawn(function()
+        if #MacroSystem.Actions == 0 then return end
         local lastAction = MacroSystem.Actions[#MacroSystem.Actions]
-        wait(lastAction.time + 1)
+        local waitTime = lastAction and lastAction.time + 1 or 1
+        wait(waitTime)
         MacroSystem.IsPlaying = false
-        PlayMacroToggle:Set(false)
-        ActionDisplay.Title = "Status"
-        ActionDisplay.Content = "Playback completed"
+        if PlayMacroToggle then
+            pcall(function()
+                PlayMacroToggle:Set(false)
+            end)
+        end
+        if ActionDisplay then
+            ActionDisplay.Title = "Status"
+            ActionDisplay.Content = "Playback completed"
+        end
     end)
 end
 
@@ -666,21 +687,27 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 position = unitData[3],
                 rotation = unitData[4]
             })
-            MacroSection:UpdateLabel(ActionDisplay, "Recorded: Place " .. unitData[1])
+            if ActionDisplay then
+                ActionDisplay.Content = "Recorded: Place " .. unitData[1]
+            end
             
         elseif actionType == "Upgrade" then -- Upgrade unit
             local unitId = args[2]
             MacroSystem:AddAction("upgrade", {
                 unitId = unitId
             })
-            MacroSection:UpdateLabel(ActionDisplay, "Recorded: Upgrade unit " .. unitId)
+            if ActionDisplay then
+                ActionDisplay.Content = "Recorded: Upgrade unit " .. tostring(unitId)
+            end
             
         elseif actionType == "Sell" then -- Sell unit
             local unitId = args[2]
             MacroSystem:AddAction("sell", {
                 unitId = unitId
             })
-            MacroSection:UpdateLabel(ActionDisplay, "Recorded: Sell unit " .. unitId)
+            if ActionDisplay then
+                ActionDisplay.Content = "Recorded: Sell unit " .. tostring(unitId)
+            end
         end
     end
     
@@ -689,6 +716,8 @@ end)
 
 -- Function to update action list display
 function UpdateActionListDisplay()
+    if not ActionDisplay then return end
+    
     if #MacroSystem.Actions == 0 then
         ActionDisplay.Title = "Status"
         ActionDisplay.Content = "No actions recorded"
@@ -740,8 +769,10 @@ MacroTab:AddButton({
             
             -- Refresh dropdown
             local macros = MacroSystem:LoadMacroList()
-            if #macros > 0 then
-                MacroDropdown:SetValues(macros)
+            if #macros > 0 and MacroDropdown then
+                pcall(function()
+                    MacroDropdown:SetValues(macros)
+                end)
             end
         else
             Fluent:Notify({
@@ -754,35 +785,39 @@ MacroTab:AddButton({
 })
 
 -- Dropdown để chọn macro
-local macros = MacroSystem:LoadMacroList()
+local macros = MacroSystem:LoadMacroList() or {}
 local MacroDropdown = MacroTab:AddDropdown("MacroDropdown", {
     Title = "Select Macro",
     Values = macros,
     Multi = false,
     Default = 1,
     Callback = function(Value)
-        if Value and Value ~= "" then
-            local success = MacroSystem:LoadMacro(Value)
+        if not Value or Value == "" then return end
+        
+        local success = MacroSystem:LoadMacro(Value)
+        
+        if success then
+            Fluent:Notify({
+                Title = "Success",
+                Content = "Loaded macro: " .. Value,
+                Duration = 3
+            })
             
-            if success then
-                Fluent:Notify({
-                    Title = "Success",
-                    Content = "Loaded macro: " .. Value,
-                    Duration = 3
-                })
-                
-                -- Update action display
-                UpdateActionListDisplay()
-                
-                -- Update input field
-                macroNameInput:Set(Value)
-            else
-                Fluent:Notify({
-                    Title = "Error",
-                    Content = "Failed to load macro: " .. Value,
-                    Duration = 3
-                })
+            -- Update action display
+            UpdateActionListDisplay()
+            
+            -- Update input field
+            if macroNameInput then
+                pcall(function()
+                    macroNameInput:Set(Value)
+                end)
             end
+        else
+            Fluent:Notify({
+                Title = "Error",
+                Content = "Failed to load macro: " .. Value,
+                Duration = 3
+            })
         end
     end
 })
@@ -795,6 +830,16 @@ local RecordMacroToggle = MacroTab:AddToggle("RecordMacroToggle", {
         MacroSystem.IsRecording = Value
         
         if Value then
+            if MacroSystem.CurrentMacro == "" then
+                Fluent:Notify({
+                    Title = "Error",
+                    Content = "Please enter a macro name first",
+                    Duration = 3
+                })
+                RecordMacroToggle:Set(false)
+                return
+            end
+            
             -- Bắt đầu ghi
             MacroSystem.Actions = {}
             MacroSystem.RecordStartTime = os.time()
@@ -806,8 +851,10 @@ local RecordMacroToggle = MacroTab:AddToggle("RecordMacroToggle", {
             })
             
             -- Reset display
-            ActionDisplay.Title = "Status"
-            ActionDisplay.Content = "Recording started... Place, upgrade or sell units"
+            if ActionDisplay then
+                ActionDisplay.Title = "Status"
+                ActionDisplay.Content = "Recording started... Place, upgrade or sell units"
+            end
         else
             -- Dừng ghi và lưu
             if #MacroSystem.Actions > 0 then
@@ -887,11 +934,19 @@ MacroTab:AddButton({
             -- Reset current macro
             MacroSystem.CurrentMacro = ""
             MacroSystem.Actions = {}
-            macroNameInput:Set("")
+            if macroNameInput then
+                pcall(function()
+                    macroNameInput:Set("")
+                end)
+            end
             
             -- Refresh dropdown
             local macros = MacroSystem:LoadMacroList()
-            MacroDropdown:SetValues(macros)
+            if MacroDropdown then
+                pcall(function()
+                    MacroDropdown:SetValues(macros)
+                end)
+            end
         else
             Fluent:Notify({
                 Title = "Error",
